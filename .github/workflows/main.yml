@@ -33,5 +33,6 @@ jobs:
             echo "No roster changes detected."
           else
             git commit -m "Auto-update roster with latest Madden ratings [skip ci]"
+            git pull --rebase origin main
             git push
           fi
