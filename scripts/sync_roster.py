@@ -24,42 +24,61 @@ def fetch_latest_roster():
 
 def balance_roster(data):
     """
-    Compresses team overall disparities to a realistic 4-6 point gap
-    while 100% preserving player rankings, depth charts, and weekly moves.
+    1. Normalizes all player overalls around a 78 starter median.
+    2. Directly compresses offensive and defensive linemen blocking/shedding 
+       attributes so the game engine stops generating 97-98 overalls.
+    3. Retains ranking order: elite linemen stay #1, but peak at 89-91 instead of 98.
     """
     players = data if isinstance(data, list) else data.get("players", [])
-    print(f"Applying parity compression to {len(players)} players...")
+    print(f"Applying trench and parity compression to {len(players)} players...")
 
-    # Individual skill stats that cause gameplay bloat when > 86
-    stat_keys = [
-        "speed", "acceleration", "catching", 
-        "throwingPower", "throwingAccuracy", 
-        "passRush", "runBlocking", "passBlocking"
+    high_impact_stats = [
+        "speed", "acceleration", "strength", "agility",
+        "catching", "throwingPower", "throwingAccuracy",
+        "runBlocking", "passBlocking",
+        "tackle", "passRush", "blockShedding", "coverage"
     ]
+
+    o_line = {"OT", "OG", "C"}
+    d_line = {"DE", "DT", "EDG", "EDGE", "DL"}
 
     for p in players:
         ovr = p.get("overall")
+        pos = p.get("position", "")
         age = p.get("age", 25)
 
-        # 1. Compress Overall around league-starter median (78)
-        # Squeezes a 12-point team gap down to a competitive 4-5 point gap
+        # 1. Base Overall Compression around 78 median
         if isinstance(ovr, (int, float)):
             delta = ovr - 78
-            p["overall"] = int(round(78 + (delta * 0.55)))
+            p["overall"] = int(round(78 + (delta * 0.52)))
 
-        # 2. Compress high-impact physical attributes to match the new scale
-        for stat in stat_keys:
+        # 2. General Attribute Soft-Cap
+        for stat in high_impact_stats:
             val = p.get(stat)
             if isinstance(val, (int, float)) and val > 86:
-                p[stat] = int(round(86 + ((val - 86) * 0.50)))
+                p[stat] = int(round(86 + ((val - 86) * 0.48)))
 
-        # 3. Scramble adjustment for mobile QBs (prevents 150+ rush attempts)
-        if p.get("position") == "QB":
+        # 3. LINEMAN SPECIAL BALANCE:
+        # Compresses specific OL/DL stats so PGM calculates 89-91 instead of 97-98
+        if pos in o_line:
+            for b_stat in ["runBlocking", "passBlocking", "strength"]:
+                b_val = p.get(b_stat)
+                if isinstance(b_val, (int, float)) and b_val > 84:
+                    p[b_stat] = int(round(84 + ((b_val - 84) * 0.42)))
+
+        if pos in d_line:
+            for d_stat in ["passRush", "blockShedding", "tackle", "strength"]:
+                d_val = p.get(d_stat)
+                if isinstance(d_val, (int, float)) and d_val > 84:
+                    p[d_stat] = int(round(84 + ((d_val - 84) * 0.42)))
+
+        # 4. Mobile QB Scramble Tuning
+        if pos == "QB":
             spd = p.get("speed")
             if isinstance(spd, (int, float)) and spd > 80:
                 p["speed"] = int(round(80 + ((spd - 80) * 0.45)))
 
-        # 4. Regression check for aging stars
+        # 5. Veteran Potential Ceiling (Natural regression)
         pot = p.get("potential")
         if pot is not None and isinstance(pot, (int, float)) and age >= 29:
             p["potential"] = min(pot, p.get("overall", pot))
