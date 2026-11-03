@@ -2,36 +2,38 @@ name: Auto Update PGM Roster
 
 on:
   schedule:
-    # Runs every Friday at 06:00 UTC (after EA's Thursday roster release)
-    - cron: '0 6 * * 5'
-  workflow_dispatch: # Allows manual 1-click trigger anytime
+    - cron: '0 6 * * 2' # Runs automatically every Tuesday at 6:00 AM UTC
+  workflow_dispatch:      # Allows manual trigger anytime via the Actions tab
+
+permissions:
+  contents: write
 
 jobs:
   update-roster:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Check out repository
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Run Roster Sync
+      - name: Run sync script
         run: python scripts/sync_roster.py
 
-      - name: Commit and push if changed
+      - name: Commit and push changes
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           git add roster.json
           if git diff --staged --quiet; then
-            echo "No roster changes detected."
+            echo "Roster is already up to date. Nothing to commit."
           else
-            git commit -m "Auto-update roster with latest Madden ratings [skip ci]"
-            git push
+            git commit -m "Auto-update roster for Pocket GM v1.6.2 [skip ci]"
+            git push origin main
           fi
