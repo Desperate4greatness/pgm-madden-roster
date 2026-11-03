@@ -29,11 +29,10 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git pull --rebase origin main
           git add roster.json staff.json
           if git diff --staged --quiet; then
             echo "Both roster and staff are up to date. Nothing to commit."
           else
             git commit -m "Auto-update roster & staff for Pocket GM [skip ci]"
-            git push origin main
+            git push origin HEAD:main
           fi
