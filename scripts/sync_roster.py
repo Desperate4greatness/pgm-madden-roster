@@ -24,62 +24,42 @@ def fetch_latest_roster():
 
 def balance_roster(data):
     """
-    1. Soft-compresses 88+ individual attributes to maintain realistic stats.
-    2. Adjusts backup QBs so starting QB injuries matter.
-    3. Normalizes team parity: compresses runaway 85+ teams (DET, SF, LAR)
-       and supports contender floors (BAL, BUF).
+    Compresses team overall disparities to a realistic 4-6 point gap
+    while 100% preserving player rankings, depth charts, and weekly moves.
     """
     players = data if isinstance(data, list) else data.get("players", [])
-    print(f"Balancing team rosters and attributes for {len(players)} players...")
+    print(f"Applying parity compression to {len(players)} players...")
 
-    # Team abbreviation mapping / targets
-    # Soft limits on runaway teams vs depressed contenders
-    TEAM_DOWNSCALE = {"DET", "SF", "LAR"}
-    TEAM_UPSCALE = {"BAL", "BUF", "KC"}
-
-    high_impact_stats = [
+    # Individual skill stats that cause gameplay bloat when > 86
+    stat_keys = [
         "speed", "acceleration", "catching", 
         "throwingPower", "throwingAccuracy", 
-        "passRush"
+        "passRush", "runBlocking", "passBlocking"
     ]
 
     for p in players:
-        team = p.get("team", "") or p.get("teamID", "")
-        pos = p.get("position", "")
-        ovr = p.get("overall", 70)
+        ovr = p.get("overall")
         age = p.get("age", 25)
 
-        # 1. Soft-compress individual peak ratings
-        for stat in high_impact_stats:
+        # 1. Compress Overall around league-starter median (78)
+        # Squeezes a 12-point team gap down to a competitive 4-5 point gap
+        if isinstance(ovr, (int, float)):
+            delta = ovr - 78
+            p["overall"] = int(round(78 + (delta * 0.55)))
+
+        # 2. Compress high-impact physical attributes to match the new scale
+        for stat in stat_keys:
             val = p.get(stat)
-            if isinstance(val, (int, float)) and val > 87:
-                p[stat] = int(round(87 + ((val - 87) * 0.52)))
+            if isinstance(val, (int, float)) and val > 86:
+                p[stat] = int(round(86 + ((val - 86) * 0.50)))
 
-        # 2. Scramble tuning for mobile QBs
-        if pos == "QB":
+        # 3. Scramble adjustment for mobile QBs (prevents 150+ rush attempts)
+        if p.get("position") == "QB":
             spd = p.get("speed")
-            if isinstance(spd, (int, float)) and spd > 82:
-                p["speed"] = int(round(82 + ((spd - 82) * 0.45)))
+            if isinstance(spd, (int, float)) and spd > 80:
+                p["speed"] = int(round(80 + ((spd - 80) * 0.45)))
 
-        # 3. Overall Rating Compression (Star players)
-        if isinstance(ovr, (int, float)) and ovr > 87:
-            p["overall"] = int(round(87 + ((ovr - 87) * 0.55)))
-            ovr = p["overall"]
-
-        # 4. Team-Specific Parity Compression:
-        # Pull down runaway team rosters slightly (-2 to high-end starters)
-        if team in TEAM_DOWNSCALE and isinstance(ovr, (int, float)) and ovr >= 80:
-            p["overall"] = max(78, ovr - 2)
-
-        # Lift the starting core floor on contenders depressed by Madden depth grading (+2 to 74-82 starters)
-        if team in TEAM_UPSCALE and isinstance(ovr, (int, float)) and 74 <= ovr <= 82:
-            p["overall"] = min(84, ovr + 2)
-
-        # 5. Offensive Line Ceiling (Prevents runaway team OVR spikes)
-        if pos in ["OT", "OG", "C"] and isinstance(ovr, (int, float)) and ovr > 84:
-            p["overall"] = int(round(84 + ((ovr - 84) * 0.50)))
-
-        # 6. Veteran Potential Regression
+        # 4. Regression check for aging stars
         pot = p.get("potential")
         if pot is not None and isinstance(pot, (int, float)) and age >= 29:
             p["potential"] = min(pot, p.get("overall", pot))
@@ -109,6 +89,7 @@ def fetch_real_staff():
     return data
 
 def main():
+    # 1. Build & Balance Player Roster
     print("--- 1. Syncing & Balancing Players ---")
     roster_data = fetch_latest_roster()
     roster_data = calibrate_for_v162(roster_data)
@@ -118,6 +99,7 @@ def main():
         json.dump(roster_data, f, separators=(',', ':'))
     print("Saved calibrated and balanced roster.json.")
 
+    # 2. Build Staff Roster
     print("--- 2. Syncing Staff & Schemes ---")
     staff_data = fetch_real_staff()
     with open("staff.json", "w", encoding="utf-8") as f:
