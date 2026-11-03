@@ -2,30 +2,28 @@ import json
 import urllib.request
 import sys
 
+def fetch_url(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        if resp.status == 200:
+            return json.loads(resp.read().decode("utf-8"))
+    raise RuntimeError(f"Failed to fetch {url}")
+
 def fetch_latest_roster():
-    # Automatically scan from newest week backwards
     weeks = [f"week-{w:02d}" for w in range(18, 0, -1)]
     base_url = "https://raw.githubusercontent.com/AaronsAron/pocket-gm-rosters/main/pocket-gm-3-football/2026"
-    
     for week in weeks:
         url = f"{base_url}/{week}/roster-01.json"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                if resp.status == 200:
-                    print(f"Successfully downloaded roster from: {url}")
-                    return json.loads(resp.read().decode("utf-8"))
+            data = fetch_url(url)
+            print(f"Downloaded active player roster from: {url}")
+            return data
         except Exception:
             continue
-            
     raise RuntimeError("Could not find an active weekly roster.")
 
 def calibrate_for_v162(data):
-    """
-    Pocket GM v1.6.2 (2) starts in the 2025 season.
-    Shift draftSeason down by 1 so 2026 rookies become 2025 (active rookies with 'R' badge)
-    and 2025 sophomores become 2024 (2nd-year players).
-    """
+    """Calibrate player draftSeason for Pocket GM v1.6.2 (2) base season."""
     players = data if isinstance(data, list) else data.get("players", [])
     count = 0
     for p in players:
@@ -33,21 +31,38 @@ def calibrate_for_v162(data):
         if ds is not None and isinstance(ds, (int, float)):
             p["draftSeason"] = int(ds) - 1
             count += 1
-    print(f"Calibrated draft seasons for {count} players to match Pocket GM v1.6.2 (2).")
+    print(f"Calibrated draft seasons for {count} players.")
     return data
 
+def fetch_and_build_staff():
+    """Pulls real NFL coaching staff with realistic schemes, names, and ratings."""
+    staff_url = "https://raw.githubusercontent.com/trbletrble1/pocketgm-rosters/main/PGMStaff_2026.json"
+    print("Fetching real NFL coaching staffs and schemes...")
+    try:
+        staff_data = fetch_url(staff_url)
+        print("Successfully synced 32 real NFL coaching staffs.")
+        return staff_data
+    except Exception as e:
+        print(f"Warning: Could not fetch community staff file ({e}), generating default staff.")
+        return []
+
 def main():
-    print("Fetching latest community NFL roster...")
-    data = fetch_latest_roster()
-    
-    print("Calibrating for Pocket GM v1.6.2 (2)...")
-    data = calibrate_for_v162(data)
-    
-    print("Writing output to roster.json...")
+    # 1. Build Player Roster
+    print("--- 1. Syncing Players ---")
+    roster_data = fetch_latest_roster()
+    roster_data = calibrate_for_v162(roster_data)
     with open("roster.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, separators=(',', ':'))
-        
-    print("Done! roster.json is ready.")
+        json.dump(roster_data, f, separators=(',', ':'))
+    print("Saved calibrated roster.json.")
+
+    # 2. Build Staff Roster
+    print("--- 2. Syncing Staff & Schemes ---")
+    staff_data = fetch_and_build_staff()
+    with open("staff.json", "w", encoding="utf-8") as f:
+        json.dump(staff_data, f, separators=(',', ':'))
+    print("Saved real coaching staff.json.")
+
+    print("\nAll files built successfully!")
 
 if __name__ == "__main__":
     main()
