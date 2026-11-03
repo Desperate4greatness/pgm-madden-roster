@@ -23,11 +23,13 @@ def fetch_latest_roster():
     raise RuntimeError("Could not find an active weekly roster.")
 
 def balance_stat_dict(d, pos):
-    """Compresses ratings whether they live directly on player or inside a nested dict."""
+    """
+    Directly compresses pass rush, block shedding, and line blocking.
+    Caps the absolute peak attributes so stars land at 89-91 OVR, not 95-98.
+    """
     o_line = {"OT", "OG", "C", "T", "G"}
-    d_line = {"DE", "DT", "EDG", "EDGE", "DL", "NT"}
+    d_front = {"DE", "DT", "EDG", "EDGE", "DL", "NT", "OLB", "LB", "MLB"}
 
-    # Lineman target attributes
     ol_keys = ["runblocking", "passblocking", "runblock", "passblock", "strength"]
     dl_keys = ["passrush", "blockshedding", "blockshed", "tackle", "strength"]
     high_impact_keys = [
@@ -43,24 +45,26 @@ def balance_stat_dict(d, pos):
 
         k_lower = k.lower()
 
-        # 1. Specialized OL check
-        if pos in o_line and k_lower in ol_keys and val > 84:
-            d[k] = int(round(84 + ((val - 84) * 0.40)))
+        # 1. TIGHTER OL Compression: Capping Williams/Sewell around 89-91
+        if pos in o_line and k_lower in ol_keys and val > 80:
+            compressed = int(round(80 + ((val - 80) * 0.45)))
+            d[k] = min(90, compressed)
 
-        # 2. Specialized DL/Edge check
-        elif pos in d_line and k_lower in dl_keys and val > 84:
-            d[k] = int(round(84 + ((val - 84) * 0.40)))
+        # 2. TIGHTER PASS RUSHER & OLB Compression: Capping Parsons/Watt/Bosa around 89-91
+        elif pos in d_front and k_lower in dl_keys and val > 80:
+            compressed = int(round(80 + ((val - 80) * 0.45)))
+            d[k] = min(91, compressed)
 
-        # 3. High impact attributes soft-cap
-        elif k_lower in high_impact_keys and val > 86:
-            d[k] = int(round(86 + ((val - 86) * 0.48)))
+        # 3. All other positions (WR/CB/RB/S) soft-cap
+        elif k_lower in high_impact_keys and val > 84:
+            compressed = int(round(84 + ((val - 84) * 0.42)))
+            d[k] = min(91, compressed)
 
-        # 4. QB Scramble nerf
-        elif pos == "QB" and k_lower == "speed" and val > 80:
-            d[k] = int(round(80 + ((val - 80) * 0.45)))
+        # 4. QB Scramble Tuning
+        elif pos == "QB" and k_lower == "speed" and val > 78:
+            d[k] = int(round(78 + ((val - 78) * 0.40)))
 
 def balance_roster(data):
-    # Extract players whether the root is a list, dict with 'players', or dict with 'teams'
     players = []
     if isinstance(data, list):
         players = data
@@ -71,36 +75,40 @@ def balance_roster(data):
             for t in data["teams"]:
                 players.extend(t.get("players", t.get("roster", [])))
 
-    print(f"Applying deep trench & parity compression to {len(players)} players...")
+    print(f"Applying strict ceiling compression to {len(players)} players...")
     modified_count = 0
 
     for p in players:
         pos = p.get("position", "") or p.get("pos", "")
         age = p.get("age", 25)
 
-        # A. Compress Overall rating
+        # A. Squeeze Overall: League baseline is 77, top ceiling is 90-91
         for ovr_key in ["overall", "ovr", "Overall", "Ovr"]:
             if ovr_key in p and isinstance(p[ovr_key], (int, float)):
                 orig = p[ovr_key]
-                p[ovr_key] = int(round(78 + ((orig - 78) * 0.52)))
+                if orig > 80:
+                    compressed_ovr = int(round(80 + ((orig - 80) * 0.45)))
+                    p[ovr_key] = min(91, compressed_ovr)
+                elif orig < 72:
+                    p[ovr_key] = int(round(72 - ((72 - orig) * 0.60)))
                 if orig != p[ovr_key]:
                     modified_count += 1
 
         # B. Balance root-level attributes
         balance_stat_dict(p, pos)
 
-        # C. Balance nested attribute containers if present
+        # C. Balance nested attribute objects (if present)
         for nested in ["attributes", "skills", "ratings", "stats"]:
             if nested in p and isinstance(p[nested], dict):
                 balance_stat_dict(p[nested], pos)
 
-        # D. Veteran Potential Decay
+        # D. Age regression for potential
         for pot_key in ["potential", "pot", "Potential"]:
             if pot_key in p and isinstance(p[pot_key], (int, float)) and age >= 29:
                 curr_ovr = p.get("overall", p.get("ovr", p[pot_key]))
                 p[pot_key] = min(p[pot_key], curr_ovr)
 
-    print(f"Successfully balanced attributes and overalls for {modified_count} players.")
+    print(f"Compressed attributes and overall ratings for {modified_count} players.")
     return data
 
 def calibrate_for_v162(data):
@@ -134,7 +142,7 @@ def fetch_real_staff():
     return data
 
 def main():
-    print("--- 1. Syncing & Deep Balancing Players ---")
+    print("--- 1. Syncing & Balancing Players ---")
     roster_data = fetch_latest_roster()
     roster_data = calibrate_for_v162(roster_data)
     roster_data = balance_roster(roster_data)
