@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Pocket GM Football - Live 2026 Week 8 Roster Harmonizer
-Pulls the active Week 8 NFL database and applies Madden attribute harmonization.
+Pocket GM Football - Fully Automated Dynamic Weekly Synchronizer
+Auto-detects the latest available NFL week, downloads it, and harmonizes Madden stats.
 """
 
 import json
 import urllib.request
 
-# The official Week 8 live roster (released November 2026)
-WEEKLY_2026_ROSTER_URL = "https://raw.githubusercontent.com/AaronsAron/pocket-gm-rosters/refs/heads/main/pocket-gm-3-football/2026/week-08/roster-01.json"
+REPO_API_URL = "https://api.github.com/repos/AaronsAron/pocket-gm-rosters/contents/pocket-gm-3-football/2026"
+FALLBACK_URL = "https://raw.githubusercontent.com/AaronsAron/pocket-gm-rosters/refs/heads/main/pocket-gm-3-football/2026/week-08/roster-01.json"
 OUTPUT_FILE = "roster.json"
 
 def fetch_json(url: str):
@@ -16,11 +16,28 @@ def fetch_json(url: str):
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
+def get_latest_weekly_url() -> str:
+    """Auto-detects the most recent week folder in the 2026 season."""
+    print("Checking for the latest available NFL week...")
+    try:
+        contents = fetch_json(REPO_API_URL)
+        # Find all folders matching "week-XX"
+        week_folders = [item["name"] for item in contents if item.get("type") == "dir" and item["name"].startswith("week-")]
+        if week_folders:
+            latest_week = sorted(week_folders)[-1]  # Highest week (e.g., week-08, week-09)
+            latest_url = f"https://raw.githubusercontent.com/AaronsAron/pocket-gm-rosters/refs/heads/main/pocket-gm-3-football/2026/{latest_week}/roster-01.json"
+            print(f"Auto-detected newest release: {latest_week.upper()}!")
+            return latest_url
+    except Exception as e:
+        print(f"Notice: Auto-detect encountered ({e}). Using verified latest fallback.")
+
+    return FALLBACK_URL
+
 def harmonize_player(p: dict) -> dict:
     pos = p.get("position", "WR").upper()
     rating = int(p.get("rating", 75))
 
-    # Wide Receivers: Protect route-running and release
+    # WR: Protect route running and release
     if pos == "WR":
         p["rushBlock"] = max(60, p.get("rushBlock", 55))
         p["passBlock"] = max(65, p.get("passBlock", 55))
@@ -28,19 +45,19 @@ def harmonize_player(p: dict) -> dict:
         p["releaseLine"] = max(p.get("releaseLine", 70), rating - 5)
         p["catching"] = max(p.get("catching", 70), rating - 4)
 
-    # Quarterbacks: Protect short accuracy & decisions for scramblers
+    # QB: Protect short accuracy and decisions for dual-threat QBs
     elif pos == "QB":
         p["sPassAcc"] = max(p.get("sPassAcc", 70), rating - 8)
         p["mPassAcc"] = max(p.get("mPassAcc", 68), rating - 10)
         p["decisions"] = max(p.get("decisions", 75), rating - 6)
 
-    # Running Backs: Prevent pass-blocking penalty
+    # RB: Remove pass-blocking penalties on speed/receiving backs
     elif pos == "RB":
         p["rushBlock"] = max(62, p.get("rushBlock", 60))
         p["passBlock"] = max(65, p.get("passBlock", 60))
         p["ballSecurity"] = max(p.get("ballSecurity", 75), rating - 6)
 
-    # Tight Ends: Receiving / Blocking balance
+    # TE: Receiving and blocking balance
     elif pos == "TE":
         p["rushBlock"] = max(68, p.get("rushBlock", 65))
         p["passBlock"] = max(70, p.get("passBlock", 65))
@@ -55,18 +72,19 @@ def harmonize_player(p: dict) -> dict:
     return p
 
 def main():
-    print("Downloading official Week 8 live NFL roster...")
-    players = fetch_json(WEEKLY_2026_ROSTER_URL)
-    print(f"Successfully loaded {len(players)} players from Week 8 database!")
+    target_url = get_latest_weekly_url()
+    print(f"Downloading roster from: {target_url}")
+    players = fetch_json(target_url)
+    print(f"Loaded {len(players)} players.")
 
-    # Apply Madden attribute harmonization across all players
+    # Harmonize stats across the entire league
     for p in players:
         harmonize_player(p)
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(players, f, indent=2)
 
-    print(f"Harmonized Week 8 roster written to {OUTPUT_FILE}.")
+    print(f"Finished! Updated roster written to {OUTPUT_FILE}.")
 
 if __name__ == "__main__":
     main()
