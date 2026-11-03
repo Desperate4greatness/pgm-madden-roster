@@ -23,7 +23,7 @@ def fetch_latest_roster():
     raise RuntimeError("Could not find an active weekly roster.")
 
 def calibrate_for_v162(data):
-    """Calibrate player draftSeason for Pocket GM v1.6.2 (2) base season."""
+    """Adjust draftSeason for Pocket GM v1.6.2 (2) base season."""
     players = data if isinstance(data, list) else data.get("players", [])
     count = 0
     for p in players:
@@ -34,17 +34,15 @@ def calibrate_for_v162(data):
     print(f"Calibrated draft seasons for {count} players.")
     return data
 
-def fetch_and_build_staff():
-    """Pulls real NFL coaching staff with realistic schemes, names, and ratings."""
-    staff_url = "https://raw.githubusercontent.com/trbletrble1/pocketgm-rosters/main/PGMStaff_2026.json"
-    print("Fetching real NFL coaching staffs and schemes...")
-    try:
-        staff_data = fetch_url(staff_url)
-        print("Successfully synced 32 real NFL coaching staffs.")
-        return staff_data
-    except Exception as e:
-        print(f"Warning: Could not fetch community staff file ({e}), generating default staff.")
-        return []
+def fetch_real_staff():
+    """Pulls verified real NFL coaching staff with all HC, OC, DC, and schemes."""
+    staff_url = "https://raw.githubusercontent.com/TheeDestroyer72/PGM21/refs/heads/main/PGMStaff2025-06-12.json"
+    print("Fetching verified NFL coaching staff...")
+    data = fetch_url(staff_url)
+    if not data or len(data) == 0:
+        raise RuntimeError("Staff data was empty!")
+    print(f"Successfully loaded {len(data)} real NFL coaches and staff members.")
+    return data
 
 def main():
     # 1. Build Player Roster
@@ -57,7 +55,7 @@ def main():
 
     # 2. Build Staff Roster
     print("--- 2. Syncing Staff & Schemes ---")
-    staff_data = fetch_and_build_staff()
+    staff_data = fetch_real_staff()
     with open("staff.json", "w", encoding="utf-8") as f:
         json.dump(staff_data, f, separators=(',', ':'))
     print("Saved real coaching staff.json.")
