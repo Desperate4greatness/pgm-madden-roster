@@ -22,74 +22,115 @@ def fetch_latest_roster():
             continue
     raise RuntimeError("Could not find an active weekly roster.")
 
+def compress_stat(val, baseline, factor, ceiling):
+    """Monotonic soft-compression: preserves exact order, lowers the extreme ceiling."""
+    if isinstance(val, (int, float)) and val > baseline:
+        return min(ceiling, int(round(baseline + ((val - baseline) * factor))))
+    return val
+
 def balance_roster(players):
     """
-    Directly compresses the exact PGM schema keys:
-    - rating & potential
-    - burst, power, agility, speed
-    - rushBlock, passBlock, skillMove, releaseLine, ballStrip, blockShedding, etc.
+    Applies tailored mathematical balance to every position group:
+    QB, RB, WR, TE, OT/OG/C, DE/OLB, DT, MLB, CB, S, K, P.
     """
-    print(f"Applying schema-exact balance to {len(players)} players...")
-
-    # Attributes in your JSON that blow up overalls and gameplay stats
-    trench_stats = [
-        "rushBlock", "passBlock", "blockShedding", "skillMove", 
-        "releaseLine", "ballStrip", "power", "burst"
-    ]
-    general_stats = [
-        "speed", "agility", "jumping", "intelligence", 
-        "vision", "decisions", "discipline", "routeRun", 
-        "trucking", "elusiveness", "zoneCover", "manCover"
-    ]
-
-    o_line = {"OT", "OG", "C"}
-    d_front = {"DE", "DT", "OLB", "MLB"}
+    print(f"Applying league-wide balance across all position groups for {len(players)} players...")
 
     for p in players:
         pos = p.get("position", "")
         age = p.get("age", 25)
         r = p.get("rating")
 
-        # 1. Compress 'rating' (Ceiling ~90-91 instead of 98)
+        # 1. League-wide Overall Rating normalization (Squeezes 98 down to 89-90)
         if isinstance(r, (int, float)):
             if r > 80:
-                p["rating"] = min(91, int(round(80 + ((r - 80) * 0.45))))
+                p["rating"] = min(90, int(round(80 + ((r - 80) * 0.45))))
             elif r < 72:
                 p["rating"] = int(round(72 - ((72 - r) * 0.55)))
 
-        # 2. Compress Trench Stats (Linemen & Edge Rushers)
-        # Squeezes 94-95 rushBlock/skillMove down to 85-88
-        for stat in trench_stats:
-            val = p.get(stat)
-            if isinstance(val, (int, float)) and val > 80:
-                if pos in o_line or pos in d_front:
-                    p[stat] = min(88, int(round(80 + ((val - 80) * 0.40))))
-                else:
-                    p[stat] = min(90, int(round(80 + ((val - 80) * 0.48))))
+        # 2. Universal Physical Attributes
+        for phys in ["burst", "power", "jumping", "agility"]:
+            if phys in p:
+                p[phys] = compress_stat(p[phys], baseline=84, factor=0.45, ceiling=89)
 
-        # 3. Compress General Performance Attributes
-        for stat in general_stats:
-            val = p.get(stat)
-            if isinstance(val, (int, float)) and val > 85:
-                p[stat] = min(90, int(round(85 + ((val - 85) * 0.45))))
+        # 3. Position-Specific Tuning
 
-        # 4. QB Scramble nerf
+        # --- QUARTERBACKS (QB) ---
         if pos == "QB":
-            spd = p.get("speed")
-            if isinstance(spd, (int, float)) and spd > 78:
-                p["speed"] = int(round(78 + ((spd - 78) * 0.40)))
+            for acc in ["sPassAcc", "mPassAcc", "dPassAcc", "throwOnRun"]:
+                if acc in p:
+                    p[acc] = compress_stat(p[acc], baseline=82, factor=0.45, ceiling=89)
+            if "speed" in p:
+                # Stops mobile QBs from accumulating 200+ scrambles
+                p["speed"] = compress_stat(p["speed"], baseline=76, factor=0.40, ceiling=82)
 
-        # 5. Potential & Veteran Decay
+        # --- RUNNING BACKS (RB) ---
+        elif pos == "RB":
+            for rb_stat in ["trucking", "elusiveness", "ballSecurity", "speed"]:
+                if rb_stat in p:
+                    p[rb_stat] = compress_stat(p[rb_stat], baseline=83, factor=0.45, ceiling=88)
+
+        # --- WIDE RECEIVERS (WR) ---
+        elif pos == "WR":
+            for wr_stat in ["routeRun", "releaseLine", "catching", "speed"]:
+                if wr_stat in p:
+                    p[wr_stat] = compress_stat(p[wr_stat], baseline=83, factor=0.48, ceiling=90)
+
+        # --- TIGHT ENDS (TE) ---
+        elif pos == "TE":
+            for te_stat in ["catching", "routeRun", "rushBlock", "passBlock"]:
+                if te_stat in p:
+                    p[te_stat] = compress_stat(p[te_stat], baseline=82, factor=0.45, ceiling=87)
+
+        # --- OFFENSIVE LINE (OT, OG, C) ---
+        elif pos in {"OT", "OG", "C"}:
+            for ol_stat in ["rushBlock", "passBlock", "releaseLine"]:
+                if ol_stat in p:
+                    p[ol_stat] = compress_stat(p[ol_stat], baseline=80, factor=0.40, ceiling=87)
+
+        # --- EDGE RUSHERS (DE, OLB) ---
+        elif pos in {"DE", "OLB"}:
+            for edge_stat in ["skillMove", "releaseLine", "ballStrip", "blockShedding", "tackle"]:
+                if edge_stat in p:
+                    p[edge_stat] = compress_stat(p[edge_stat], baseline=80, factor=0.45, ceiling=89)
+
+        # --- INTERIOR DEFENSIVE LINE (DT) ---
+        elif pos == "DT":
+            for dt_stat in ["blockShedding", "tackle", "ballStrip"]:
+                if dt_stat in p:
+                    p[dt_stat] = compress_stat(p[dt_stat], baseline=80, factor=0.42, ceiling=87)
+
+        # --- LINEBACKERS (MLB, LB) ---
+        elif pos in {"MLB", "LB"}:
+            for lb_stat in ["tackle", "blockShedding", "zoneCover", "manCover"]:
+                if lb_stat in p:
+                    p[lb_stat] = compress_stat(p[lb_stat], baseline=81, factor=0.44, ceiling=88)
+
+        # --- SECONDARY: CORNERBACKS (CB) & SAFETIES (S) ---
+        elif pos in {"CB", "S"}:
+            for db_stat in ["manCover", "zoneCover", "ballStrip", "releaseLine", "tackle", "speed"]:
+                if db_stat in p:
+                    p[db_stat] = compress_stat(p[db_stat], baseline=83, factor=0.45, ceiling=89)
+
+        # --- SPECIAL TEAMS: KICKERS & PUNTERS (K, P) ---
+        elif pos in {"K", "P"}:
+            if "kickAccuracy" in p:
+                p["kickAccuracy"] = compress_stat(p["kickAccuracy"], baseline=82, factor=0.45, ceiling=88)
+
+        # 4. Intelligence & Vision Sanity
+        for mental in ["intelligence", "vision", "decisions", "discipline"]:
+            if mental in p:
+                p[mental] = compress_stat(p[mental], baseline=85, factor=0.45, ceiling=90)
+
+        # 5. Potential & Veteran Progression Control
         pot = p.get("potential")
-        cur_rating = p.get("rating", pot)
+        cur_r = p.get("rating", pot)
         if isinstance(pot, (int, float)):
             if age >= 29:
-                p["potential"] = min(pot, cur_rating)
-            elif age <= 23 and pot < cur_rating:
-                p["potential"] = min(95, cur_rating + 4)
+                p["potential"] = min(pot, cur_r)
+            elif age <= 23 and pot < cur_r:
+                p["potential"] = min(94, cur_r + 4)
             elif pot > 85:
-                # Soft-compress young potential ceiling
-                p["potential"] = min(94, int(round(85 + ((pot - 85) * 0.55))))
+                p["potential"] = min(93, int(round(85 + ((pot - 85) * 0.52))))
 
     return players
 
@@ -114,7 +155,7 @@ def fetch_real_staff():
     return data
 
 def main():
-    print("--- 1. Syncing & Schema-Exact Balancing ---")
+    print("--- 1. Syncing & League-Wide Balancing ---")
     roster_data = fetch_latest_roster()
     roster_data = calibrate_for_v162(roster_data)
     roster_data = balance_roster(roster_data)
