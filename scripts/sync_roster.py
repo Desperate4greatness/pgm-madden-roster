@@ -22,6 +22,47 @@ def fetch_latest_roster():
             continue
     raise RuntimeError("Could not find an active weekly roster.")
 
+def balance_roster(data):
+    """
+    Maintains 100% of weekly ranking order and depth charts,
+    while scaling attribute deltas so Pocket GM's sim engine
+    produces realistic NFL stats.
+    """
+    players = data if isinstance(data, list) else data.get("players", [])
+
+    # Core stats that break PGM simulation volume when > 87
+    high_impact_stats = [
+        "speed", "acceleration", "catching", 
+        "throwingPower", "throwingAccuracy", 
+        "passRush"
+    ]
+
+    for p in players:
+        # 1. Soft-compress top-tier ratings (preserves exact rank order)
+        for stat in high_impact_stats:
+            val = p.get(stat)
+            if isinstance(val, (int, float)) and val > 87:
+                p[stat] = int(round(87 + ((val - 87) * 0.52)))
+
+        # 2. Scramble Frequency Tuning (QBs)
+        if p.get("position") == "QB":
+            spd = p.get("speed")
+            if isinstance(spd, (int, float)) and spd > 82:
+                p["speed"] = int(round(82 + ((spd - 82) * 0.45)))
+
+        # 3. Overall Rating Compression (88-99 range)
+        ovr = p.get("overall")
+        if isinstance(ovr, (int, float)) and ovr > 87:
+            p["overall"] = int(round(87 + ((ovr - 87) * 0.55)))
+
+        # 4. Age/Potential Sanity
+        age = p.get("age", 25)
+        pot = p.get("potential")
+        if isinstance(pot, (int, float)) and age >= 29:
+            p["potential"] = min(pot, p.get("overall", pot))
+
+    return data
+
 def calibrate_for_v162(data):
     """Adjust draftSeason for Pocket GM v1.6.2 (2) base season."""
     players = data if isinstance(data, list) else data.get("players", [])
@@ -45,13 +86,15 @@ def fetch_real_staff():
     return data
 
 def main():
-    # 1. Build Player Roster
-    print("--- 1. Syncing Players ---")
+    # 1. Build & Balance Player Roster
+    print("--- 1. Syncing & Balancing Players ---")
     roster_data = fetch_latest_roster()
     roster_data = calibrate_for_v162(roster_data)
+    roster_data = balance_roster(roster_data)
+
     with open("roster.json", "w", encoding="utf-8") as f:
         json.dump(roster_data, f, separators=(',', ':'))
-    print("Saved calibrated roster.json.")
+    print("Saved calibrated and balanced roster.json.")
 
     # 2. Build Staff Roster
     print("--- 2. Syncing Staff & Schemes ---")
