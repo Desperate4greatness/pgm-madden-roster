@@ -1,88 +1,53 @@
-#!/usr/bin/env python3
-"""
-Pocket GM Football - Live 2026 Week 8 Roster Harmonizer
-Auto-detects the newest week and applies Madden attribute harmonization.
-Preserves all active rookies on their real NFL teams.
-"""
-
 import json
 import urllib.request
+import sys
 
-REPO_API_URL = "https://api.github.com/repos/AaronsAron/pocket-gm-rosters/contents/pocket-gm-3-football/2026"
-FALLBACK_URL = "https://raw.githubusercontent.com/AaronsAron/pocket-gm-rosters/refs/heads/main/pocket-gm-3-football/2026/week-08/roster-01.json"
-OUTPUT_FILE = "roster.json"
+def fetch_latest_roster():
+    # Automatically scan from newest week backwards
+    weeks = [f"week-{w:02d}" for w in range(18, 0, -1)]
+    base_url = "https://raw.githubusercontent.com/AaronsAron/pocket-gm-rosters/main/pocket-gm-3-football/2026"
+    
+    for week in weeks:
+        url = f"{base_url}/{week}/roster-01.json"
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    print(f"Successfully downloaded roster from: {url}")
+                    return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            continue
+            
+    raise RuntimeError("Could not find an active weekly roster.")
 
-def fetch_json(url: str):
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-def get_latest_weekly_url() -> str:
-    print("Checking for the latest available NFL week...")
-    try:
-        contents = fetch_json(REPO_API_URL)
-        week_folders = [item["name"] for item in contents if item.get("type") == "dir" and item["name"].startswith("week-")]
-        if week_folders:
-            latest_week = sorted(week_folders)[-1]
-            latest_url = f"https://raw.githubusercontent.com/AaronsAron/pocket-gm-rosters/refs/heads/main/pocket-gm-3-football/2026/{latest_week}/roster-01.json"
-            print(f"Auto-detected newest release: {latest_week.upper()}!")
-            return latest_url
-    except Exception as e:
-        print(f"Notice: Auto-detect encountered ({e}). Using verified fallback.")
-    return FALLBACK_URL
-
-def harmonize_player(p: dict) -> dict:
-    pos = p.get("position", "WR").upper()
-    rating = int(p.get("rating", 75))
-
-    # WR: Protect route running and release
-    if pos == "WR":
-        p["rushBlock"] = max(60, p.get("rushBlock", 55))
-        p["passBlock"] = max(65, p.get("passBlock", 55))
-        p["routeRun"] = max(p.get("routeRun", 70), rating - 4)
-        p["releaseLine"] = max(p.get("releaseLine", 70), rating - 5)
-        p["catching"] = max(p.get("catching", 70), rating - 4)
-
-    # QB: Protect short accuracy and decisions for scramblers
-    elif pos == "QB":
-        p["sPassAcc"] = max(p.get("sPassAcc", 70), rating - 8)
-        p["mPassAcc"] = max(p.get("mPassAcc", 68), rating - 10)
-        p["decisions"] = max(p.get("decisions", 75), rating - 6)
-
-    # RB: Prevent pass-blocking penalties
-    elif pos == "RB":
-        p["rushBlock"] = max(62, p.get("rushBlock", 60))
-        p["passBlock"] = max(65, p.get("passBlock", 60))
-        p["ballSecurity"] = max(p.get("ballSecurity", 75), rating - 6)
-
-    # TE: Receiving / blocking balance
-    elif pos == "TE":
-        p["rushBlock"] = max(68, p.get("rushBlock", 65))
-        p["passBlock"] = max(70, p.get("passBlock", 65))
-        p["catching"] = max(p.get("catching", 70), rating - 5)
-
-    # Secondary: Prevent Man vs Zone split penalties
-    elif pos in ["CB", "FS", "SS"]:
-        cov = max(p.get("manCover", 70), p.get("zoneCover", 70))
-        p["manCover"] = max(p.get("manCover", 65), cov - 8)
-        p["zoneCover"] = max(p.get("zoneCover", 65), cov - 8)
-
-    return p
+def calibrate_for_v162(data):
+    """
+    Pocket GM v1.6.2 (2) starts in the 2025 season.
+    Shift draftSeason down by 1 so 2026 rookies become 2025 (active rookies with 'R' badge)
+    and 2025 sophomores become 2024 (2nd-year players).
+    """
+    players = data if isinstance(data, list) else data.get("players", [])
+    count = 0
+    for p in players:
+        ds = p.get("draftSeason")
+        if ds is not None and isinstance(ds, (int, float)):
+            p["draftSeason"] = int(ds) - 1
+            count += 1
+    print(f"Calibrated draft seasons for {count} players to match Pocket GM v1.6.2 (2).")
+    return data
 
 def main():
-    target_url = get_latest_weekly_url()
-    print(f"Downloading live roster from: {target_url}")
-    players = fetch_json(target_url)
-    print(f"Loaded {len(players)} total players.")
-
-    # Apply Madden attribute harmonization
-    for p in players:
-        harmonize_player(p)
-
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(players, f, indent=2)
-
-    print(f"Finished! Roster with active rookies written to {OUTPUT_FILE}.")
+    print("Fetching latest community NFL roster...")
+    data = fetch_latest_roster()
+    
+    print("Calibrating for Pocket GM v1.6.2 (2)...")
+    data = calibrate_for_v162(data)
+    
+    print("Writing output to roster.json...")
+    with open("roster.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, separators=(',', ':'))
+        
+    print("Done! roster.json is ready.")
 
 if __name__ == "__main__":
     main()
