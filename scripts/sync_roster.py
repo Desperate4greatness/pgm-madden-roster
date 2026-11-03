@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Pocket GM Football - Fully Automated Dynamic Weekly Synchronizer
-Auto-detects the newest week, harmonizes Madden stats, and enforces the 53-man active limit.
+Pocket GM Football - Complete Automated Synchronizer
+Auto-detects current week, harmonizes Madden stats, enforces 53-man rosters, and fixes rookie badges.
 """
 
 import json
@@ -17,7 +17,6 @@ def fetch_json(url: str):
         return json.loads(resp.read().decode("utf-8"))
 
 def get_latest_weekly_url() -> str:
-    """Auto-detects the highest week folder in the 2026 season."""
     print("Checking for the latest available NFL week...")
     try:
         contents = fetch_json(REPO_API_URL)
@@ -29,14 +28,25 @@ def get_latest_weekly_url() -> str:
             return latest_url
     except Exception as e:
         print(f"Notice: Auto-detect encountered ({e}). Using verified fallback.")
-
     return FALLBACK_URL
+
+def fix_rookie_status(players: list):
+    """
+    Offsets draftSeason by +1 so Pocket GM assigns the 'R' (Rookie) tag
+    and ensures proper 4-year rookie contracts.
+    """
+    for p in players:
+        ds = int(p.get("draftSeason", 0))
+        if ds >= 2026:
+            p["draftSeason"] = 2027  # Pocket GM's engine trigger for current rookies
+            p["contractYear"] = 0
+            p["years"] = 4
 
 def harmonize_player(p: dict) -> dict:
     pos = p.get("position", "WR").upper()
     rating = int(p.get("rating", 75))
 
-    # Wide Receivers
+    # WR
     if pos == "WR":
         p["rushBlock"] = max(60, p.get("rushBlock", 55))
         p["passBlock"] = max(65, p.get("passBlock", 55))
@@ -44,19 +54,19 @@ def harmonize_player(p: dict) -> dict:
         p["releaseLine"] = max(p.get("releaseLine", 70), rating - 5)
         p["catching"] = max(p.get("catching", 70), rating - 4)
 
-    # Quarterbacks
+    # QB
     elif pos == "QB":
         p["sPassAcc"] = max(p.get("sPassAcc", 70), rating - 8)
         p["mPassAcc"] = max(p.get("mPassAcc", 68), rating - 10)
         p["decisions"] = max(p.get("decisions", 75), rating - 6)
 
-    # Running Backs
+    # RB
     elif pos == "RB":
         p["rushBlock"] = max(62, p.get("rushBlock", 60))
         p["passBlock"] = max(65, p.get("passBlock", 60))
         p["ballSecurity"] = max(p.get("ballSecurity", 75), rating - 6)
 
-    # Tight Ends
+    # TE
     elif pos == "TE":
         p["rushBlock"] = max(68, p.get("rushBlock", 65))
         p["passBlock"] = max(70, p.get("passBlock", 65))
@@ -71,7 +81,7 @@ def harmonize_player(p: dict) -> dict:
     return p
 
 def enforce_53_man_cutdowns(players: list) -> list:
-    """Guarantees strict 53-man active rosters across all 32 teams."""
+    """Enforces official 53-man active limits across all 32 teams."""
     pos_targets = {
         "QB": 2, "RB": 3, "WR": 6, "TE": 3,
         "OT": 4, "OG": 4, "C": 2,
@@ -141,17 +151,20 @@ def main():
     players = fetch_json(target_url)
     print(f"Loaded {len(players)} total players.")
 
-    # 1. Enforce 53-man active limits across all teams
+    # 1. Enforce 53-man active rosters
     players = enforce_53_man_cutdowns(players)
 
-    # 2. Apply Madden attribute harmonization
+    # 2. Harmonize Madden stats
     for p in players:
         harmonize_player(p)
+
+    # 3. Fix rookie badges and contracts
+    fix_rookie_status(players)
 
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(players, f, indent=2)
 
-    print(f"Successfully harmonized and locked to 53-man active rosters. Saved to {OUTPUT_FILE}.")
+    print(f"Complete! File written to {OUTPUT_FILE}.")
 
 if __name__ == "__main__":
     main()
