@@ -22,115 +22,87 @@ def fetch_latest_roster():
             continue
     raise RuntimeError("Could not find an active weekly roster.")
 
-def balance_stat_dict(d, pos):
+def balance_roster(players):
     """
-    Directly compresses pass rush, block shedding, and line blocking.
-    Caps the absolute peak attributes so stars land at 89-91 OVR, not 95-98.
+    Directly compresses the exact PGM schema keys:
+    - rating & potential
+    - burst, power, agility, speed
+    - rushBlock, passBlock, skillMove, releaseLine, ballStrip, blockShedding, etc.
     """
-    o_line = {"OT", "OG", "C", "T", "G"}
-    d_front = {"DE", "DT", "EDG", "EDGE", "DL", "NT", "OLB", "LB", "MLB"}
+    print(f"Applying schema-exact balance to {len(players)} players...")
 
-    ol_keys = ["runblocking", "passblocking", "runblock", "passblock", "strength"]
-    dl_keys = ["passrush", "blockshedding", "blockshed", "tackle", "strength"]
-    high_impact_keys = [
-        "speed", "acceleration", "strength", "agility",
-        "catching", "throwingpower", "throwingaccuracy",
-        "runblocking", "passblocking", "tackle", "passrush", "blockshedding", "coverage"
+    # Attributes in your JSON that blow up overalls and gameplay stats
+    trench_stats = [
+        "rushBlock", "passBlock", "blockShedding", "skillMove", 
+        "releaseLine", "ballStrip", "power", "burst"
+    ]
+    general_stats = [
+        "speed", "agility", "jumping", "intelligence", 
+        "vision", "decisions", "discipline", "routeRun", 
+        "trucking", "elusiveness", "zoneCover", "manCover"
     ]
 
-    for k in list(d.keys()):
-        val = d[k]
-        if not isinstance(val, (int, float)):
-            continue
-
-        k_lower = k.lower()
-
-        # 1. TIGHTER OL Compression: Capping Williams/Sewell around 89-91
-        if pos in o_line and k_lower in ol_keys and val > 80:
-            compressed = int(round(80 + ((val - 80) * 0.45)))
-            d[k] = min(90, compressed)
-
-        # 2. TIGHTER PASS RUSHER & OLB Compression: Capping Parsons/Watt/Bosa around 89-91
-        elif pos in d_front and k_lower in dl_keys and val > 80:
-            compressed = int(round(80 + ((val - 80) * 0.45)))
-            d[k] = min(91, compressed)
-
-        # 3. All other positions (WR/CB/RB/S) soft-cap
-        elif k_lower in high_impact_keys and val > 84:
-            compressed = int(round(84 + ((val - 84) * 0.42)))
-            d[k] = min(91, compressed)
-
-        # 4. QB Scramble Tuning
-        elif pos == "QB" and k_lower == "speed" and val > 78:
-            d[k] = int(round(78 + ((val - 78) * 0.40)))
-
-def balance_roster(data):
-    players = []
-    if isinstance(data, list):
-        players = data
-    elif isinstance(data, dict):
-        if "players" in data:
-            players = data["players"]
-        elif "teams" in data:
-            for t in data["teams"]:
-                players.extend(t.get("players", t.get("roster", [])))
-
-    print(f"Applying strict ceiling compression to {len(players)} players...")
-    modified_count = 0
+    o_line = {"OT", "OG", "C"}
+    d_front = {"DE", "DT", "OLB", "MLB"}
 
     for p in players:
-        pos = p.get("position", "") or p.get("pos", "")
+        pos = p.get("position", "")
         age = p.get("age", 25)
+        r = p.get("rating")
 
-        # A. Squeeze Overall: League baseline is 77, top ceiling is 90-91
-        for ovr_key in ["overall", "ovr", "Overall", "Ovr"]:
-            if ovr_key in p and isinstance(p[ovr_key], (int, float)):
-                orig = p[ovr_key]
-                if orig > 80:
-                    compressed_ovr = int(round(80 + ((orig - 80) * 0.45)))
-                    p[ovr_key] = min(91, compressed_ovr)
-                elif orig < 72:
-                    p[ovr_key] = int(round(72 - ((72 - orig) * 0.60)))
-                if orig != p[ovr_key]:
-                    modified_count += 1
+        # 1. Compress 'rating' (Ceiling ~90-91 instead of 98)
+        if isinstance(r, (int, float)):
+            if r > 80:
+                p["rating"] = min(91, int(round(80 + ((r - 80) * 0.45))))
+            elif r < 72:
+                p["rating"] = int(round(72 - ((72 - r) * 0.55)))
 
-        # B. Balance root-level attributes
-        balance_stat_dict(p, pos)
+        # 2. Compress Trench Stats (Linemen & Edge Rushers)
+        # Squeezes 94-95 rushBlock/skillMove down to 85-88
+        for stat in trench_stats:
+            val = p.get(stat)
+            if isinstance(val, (int, float)) and val > 80:
+                if pos in o_line or pos in d_front:
+                    p[stat] = min(88, int(round(80 + ((val - 80) * 0.40))))
+                else:
+                    p[stat] = min(90, int(round(80 + ((val - 80) * 0.48))))
 
-        # C. Balance nested attribute objects (if present)
-        for nested in ["attributes", "skills", "ratings", "stats"]:
-            if nested in p and isinstance(p[nested], dict):
-                balance_stat_dict(p[nested], pos)
+        # 3. Compress General Performance Attributes
+        for stat in general_stats:
+            val = p.get(stat)
+            if isinstance(val, (int, float)) and val > 85:
+                p[stat] = min(90, int(round(85 + ((val - 85) * 0.45))))
 
-        # D. Age regression for potential
-        for pot_key in ["potential", "pot", "Potential"]:
-            if pot_key in p and isinstance(p[pot_key], (int, float)) and age >= 29:
-                curr_ovr = p.get("overall", p.get("ovr", p[pot_key]))
-                p[pot_key] = min(p[pot_key], curr_ovr)
+        # 4. QB Scramble nerf
+        if pos == "QB":
+            spd = p.get("speed")
+            if isinstance(spd, (int, float)) and spd > 78:
+                p["speed"] = int(round(78 + ((spd - 78) * 0.40)))
 
-    print(f"Compressed attributes and overall ratings for {modified_count} players.")
-    return data
+        # 5. Potential & Veteran Decay
+        pot = p.get("potential")
+        cur_rating = p.get("rating", pot)
+        if isinstance(pot, (int, float)):
+            if age >= 29:
+                p["potential"] = min(pot, cur_rating)
+            elif age <= 23 and pot < cur_rating:
+                p["potential"] = min(95, cur_rating + 4)
+            elif pot > 85:
+                # Soft-compress young potential ceiling
+                p["potential"] = min(94, int(round(85 + ((pot - 85) * 0.55))))
 
-def calibrate_for_v162(data):
+    return players
+
+def calibrate_for_v162(players):
     """Adjust draftSeason for Pocket GM v1.6.2 (2) base season."""
-    players = []
-    if isinstance(data, list):
-        players = data
-    elif isinstance(data, dict):
-        if "players" in data:
-            players = data["players"]
-        elif "teams" in data:
-            for t in data["teams"]:
-                players.extend(t.get("players", t.get("roster", [])))
-
     count = 0
     for p in players:
-        for ds_key in ["draftSeason", "draft_season", "DraftSeason"]:
-            if ds_key in p and isinstance(p[ds_key], (int, float)):
-                p[ds_key] = int(p[ds_key]) - 1
-                count += 1
+        ds = p.get("draftSeason")
+        if ds is not None and isinstance(ds, (int, float)):
+            p["draftSeason"] = int(ds) - 1
+            count += 1
     print(f"Calibrated draft seasons for {count} players.")
-    return data
+    return players
 
 def fetch_real_staff():
     staff_url = "https://raw.githubusercontent.com/TheeDestroyer72/PGM21/refs/heads/main/PGMStaff2025-06-12.json"
@@ -142,7 +114,7 @@ def fetch_real_staff():
     return data
 
 def main():
-    print("--- 1. Syncing & Balancing Players ---")
+    print("--- 1. Syncing & Schema-Exact Balancing ---")
     roster_data = fetch_latest_roster()
     roster_data = calibrate_for_v162(roster_data)
     roster_data = balance_roster(roster_data)
